@@ -1,4 +1,4 @@
-.PHONY: env install clean metadata
+.PHONY: env setup clean metadata
 
 env:
 	conda create -n bio python==3.11.*
