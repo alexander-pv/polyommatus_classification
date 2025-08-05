@@ -14,7 +14,6 @@ from neptune.types import File
 from sklearn.metrics import ConfusionMatrixDisplay
 from sklearn.metrics import classification_report
 from torch.nn.functional import softmax
-from torch.utils.data import DataLoader
 
 from dataset.dataset import LycaenidaeDatasetCls
 from dataset.transform import get_cls_pretrained_transform
@@ -74,21 +73,38 @@ def evaluate_model(
     model.eval()
     y_pred = []
     y_true = []
-
-    loader = DataLoader(dataset, batch_size=1, shuffle=False)
+    probs = []
 
     with torch.no_grad():
-        for batch in tqdm.tqdm(loader, total=len(loader)):
-            imgs, labels = batch
-            imgs = imgs.to(device)
-            proba = softmax(model(imgs))
+        for idx in tqdm.tqdm(range(dataset.__len__())):
+            _, _, img_path = dataset._getitem(idx)
+            input_tensor, label = dataset.__getitem__(idx)
+            input_tensor = torch.unsqueeze(input_tensor, 0)
+
+            input_tensor = input_tensor.to(device)
+            proba = softmax(model(input_tensor))
+            max_proba = torch.max(proba, dim=1)[0]
             predicted_class = torch.argmax(proba, dim=1)
+
+            probs.append(max_proba.cpu().numpy()[0])
             y_pred.extend(predicted_class.tolist())
-            y_true.extend(labels.tolist())
+            y_true.append(label)
 
     target_names = [dataset.label_to_name(i) for i in range(dataset.n_classes)]
     report = classification_report(y_pred=y_pred, y_true=y_true, target_names=target_names, output_dict=True)
+
+    df_predictions = pd.DataFrame(
+        {
+            "filepath": dataset.df_subset_metadata["filepath"],
+            "id": dataset.df_subset_metadata["id"],
+            "class": dataset.df_subset_metadata["class"],
+            "predicted": [dataset.class_labels_inv[x] for x in y_pred],
+            "prob": probs,
+        }
+    )
     df_report = pd.DataFrame(report).T.reset_index()
+    df_predictions.to_csv(os.path.join(args.output_dir, f"df_predictions_{args.model}_view_{args.view}.csv"),
+                          index=False)
     df_report.to_csv(os.path.join(args.output_dir, f"df_report_{args.model}_view_{args.view}.csv"))
     get_confusion_matrix(np.array(y_true), np.array(y_pred), target_names,
                          os.path.join(args.output_dir, f"cmatrix_{args.model}_view_{args.view}.png"),
